@@ -107,6 +107,78 @@ async def consume_stock(product_id: int, amount: float, spoiled: bool = False) -
     }
     return await make_request("POST", f"stock/products/{product_id}/consume", data=data)
 
+# Additional Stock Helpers
+
+@mcp.tool()
+async def transfer_stock(product_id: int, amount: float, location_id_from: int, location_id_to: int, stock_entry_id: str = None) -> List[dict]:
+    """
+    Transfer stock of a product from one location to another.
+    
+    Args:
+        product_id: The ID of the product to transfer.
+        amount: The amount to transfer.
+        location_id_from: Source location ID.
+        location_id_to: Destination location ID.
+        stock_entry_id: Optional specific stock entry ID to transfer (amount must be 1 if used).
+    """
+    data = {
+        "amount": amount,
+        "location_id_from": location_id_from,
+        "location_id_to": location_id_to,
+    }
+    if stock_entry_id:
+        data["stock_entry_id"] = stock_entry_id
+    return await make_request("POST", f"stock/products/{product_id}/transfer", data=data)
+
+
+@mcp.tool()
+async def inventory_product(
+    product_id: int,
+    new_amount: float,
+    best_before_date: str = None,
+    location_id: int = None,
+    price: float = None,
+    note: str = None,
+) -> List[dict]:
+    """
+    Set the absolute stock amount for a product (inventory adjustment).
+    
+    Args:
+        product_id: The ID of the product to inventory.
+        new_amount: The new total amount in stock.
+        best_before_date: Optional best before date for added stock.
+        location_id: Optional location ID for added stock.
+        price: Optional price for added stock.
+        note: Optional note stored on the stock entry.
+    """
+    data = {
+        "new_amount": new_amount,
+    }
+    if best_before_date:
+        data["best_before_date"] = best_before_date
+    if location_id is not None:
+        data["location_id"] = location_id
+    if price is not None:
+        data["price"] = price
+    if note:
+        data["note"] = note
+    return await make_request("POST", f"stock/products/{product_id}/inventory", data=data)
+
+
+@mcp.tool()
+async def open_product(product_id: int, amount: float = 1.0) -> List[dict]:
+    """
+    Mark one or more units of a product as opened.
+    
+    Args:
+        product_id: The ID of the product to open.
+        amount: The amount to mark as opened (default 1.0).
+    """
+    data = {
+        "amount": amount,
+    }
+    return await make_request("POST", f"stock/products/{product_id}/open", data=data)
+
 # Shopping List Tools
 
 @mcp.tool()
@@ -202,6 +274,133 @@ async def consume_recipe(recipe_id: int) -> dict:
         recipe_id: The ID of the recipe to consume ingredients for.
     """
     return await make_request("POST", f"recipes/{recipe_id}/consume")
+
+# Barcode-based Stock Tools
+
+@mcp.tool()
+async def get_product_by_barcode(barcode: str) -> dict:
+    """
+    Get product details by barcode.
+    
+    Args:
+        barcode: The product barcode to look up.
+    """
+    return await make_request("GET", f"stock/products/by-barcode/{barcode}")
+
+
+@mcp.tool()
+async def add_stock_by_barcode(
+    barcode: str,
+    amount: float,
+    best_before_date: str = None,
+    price: float = None,
+    location_id: int = None,
+) -> List[dict]:
+    """
+    Add stock for a product identified by barcode (e.g., after scanning groceries).
+    
+    Args:
+        barcode: The product barcode.
+        amount: The amount to add.
+        best_before_date: Optional expiration date in YYYY-MM-DD format.
+        price: Optional price per unit.
+        location_id: Optional location ID to store the product.
+    """
+    data = {
+        "amount": amount,
+        "transaction_type": "purchase",
+    }
+    if best_before_date:
+        data["best_before_date"] = best_before_date
+    if price is not None:
+        data["price"] = price
+    if location_id is not None:
+        data["location_id"] = location_id
+    return await make_request("POST", f"stock/products/by-barcode/{barcode}/add", data=data)
+
+
+@mcp.tool()
+async def consume_stock_by_barcode(
+    barcode: str,
+    amount: float,
+    spoiled: bool = False,
+    location_id: int = None,
+) -> List[dict]:
+    """
+    Consume or spoil stock for a product identified by barcode.
+    
+    Args:
+        barcode: The product barcode.
+        amount: The amount to consume.
+        spoiled: Whether the product was spoiled (default False).
+        location_id: Optional location restriction for the stock to consume.
+    """
+    data = {
+        "amount": amount,
+        "transaction_type": "consume",
+        "spoiled": spoiled,
+    }
+    if location_id is not None:
+        data["location_id"] = location_id
+    return await make_request("POST", f"stock/products/by-barcode/{barcode}/consume", data=data)
+
+
+@mcp.tool()
+async def transfer_stock_by_barcode(
+    barcode: str,
+    amount: float,
+    location_id_from: int,
+    location_id_to: int,
+    stock_entry_id: str = None,
+) -> List[dict]:
+    """
+    Transfer stock of a barcode-identified product between locations.
+    
+    Args:
+        barcode: The product barcode.
+        amount: The amount to transfer.
+        location_id_from: Source location ID.
+        location_id_to: Destination location ID.
+        stock_entry_id: Optional specific stock entry ID to transfer (amount must be 1 if used).
+    """
+    data = {
+        "amount": amount,
+        "location_id_from": location_id_from,
+        "location_id_to": location_id_to,
+    }
+    if stock_entry_id:
+        data["stock_entry_id"] = stock_entry_id
+    return await make_request("POST", f"stock/products/by-barcode/{barcode}/transfer", data=data)
+
+
+@mcp.tool()
+async def inventory_product_by_barcode(
+    barcode: str,
+    new_amount: float,
+    best_before_date: str = None,
+    location_id: int = None,
+    price: float = None,
+) -> List[dict]:
+    """
+    Inventory a product by barcode by setting the absolute stock amount.
+    
+    Args:
+        barcode: The product barcode.
+        new_amount: The new total amount in stock.
+        best_before_date: Optional best before date for added stock.
+        location_id: Optional location ID for added stock.
+        price: Optional price for added stock.
+    """
+    data = {
+        "new_amount": new_amount,
+    }
+    if best_before_date:
+        data["best_before_date"] = best_before_date
+    if location_id is not None:
+        data["location_id"] = location_id
+    if price is not None:
+        data["price"] = price
+    return await make_request("POST", f"stock/products/by-barcode/{barcode}/inventory", data=data)
 
 # Chore Tools
 
