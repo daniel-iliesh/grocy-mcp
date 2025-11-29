@@ -26,8 +26,27 @@ async def make_request(method: str, endpoint: str, params: dict = None, data: di
     }
     
     async with httpx.AsyncClient() as client:
-        response = await client.request(method, url, headers=headers, params=params, json=data)
-        response.raise_for_status()
+        try:
+            response = await client.request(method, url, headers=headers, params=params, json=data)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # Log detailed information for easier debugging of Grocy API errors
+            resp = exc.response
+            body = None
+            try:
+                body = resp.text
+            except Exception:
+                body = "<unable to read response body>"
+            print(
+                "Grocy API error:",
+                {
+                    "method": method,
+                    "url": url,
+                    "status_code": resp.status_code,
+                    "response_body": body,
+                },
+            )
+            raise
         return response.json()
 
 @mcp.tool()
@@ -255,6 +274,17 @@ async def get_recipe(recipe_id: int) -> dict:
     """
     return await make_request("GET", f"objects/recipes/{recipe_id}")
 
+
+@mcp.tool()
+async def delete_recipe(recipe_id: int) -> None:
+    """
+    Delete a recipe by id.
+
+    Args:
+        recipe_id: ID of the recipe to delete.
+    """
+    return await make_request("DELETE", f"objects/recipes/{recipe_id}")
+
 @mcp.tool()
 async def add_recipe_to_shopping_list(recipe_id: int) -> dict:
     """
@@ -274,6 +304,25 @@ async def consume_recipe(recipe_id: int) -> dict:
         recipe_id: The ID of the recipe to consume ingredients for.
     """
     return await make_request("POST", f"recipes/{recipe_id}/consume")
+
+
+@mcp.tool()
+async def get_recipe_fulfillment(recipe_id: int) -> dict:
+    """
+    Get stock fulfillment information for a specific recipe.
+
+    Args:
+        recipe_id: The ID of the recipe.
+    """
+    return await make_request("GET", f"recipes/{recipe_id}/fulfillment")
+
+
+@mcp.tool()
+async def get_all_recipes_fulfillment() -> List[dict]:
+    """
+    Get stock fulfillment information for all recipes.
+    """
+    return await make_request("GET", "recipes/fulfillment")
 
 # Barcode-based Stock Tools
 
@@ -402,6 +451,344 @@ async def inventory_product_by_barcode(
         data["price"] = price
     return await make_request("POST", f"stock/products/by-barcode/{barcode}/inventory", data=data)
 
+
+@mcp.tool()
+async def external_barcode_lookup(barcode: str, add: bool = False) -> dict:
+    """
+    Perform an external barcode lookup via Grocy's configured plugin.
+
+    Args:
+        barcode: The barcode to look up.
+        add: If true and the plugin supports it, automatically add the product to Grocy.
+    """
+    params = {"add": "true" if add else "false"}
+    return await make_request("GET", f"stock/barcodes/external-lookup/{barcode}", params=params)
+
+@mcp.tool()
+async def create_simple_product(
+    name: str,
+    qu_id_stock: int,
+    qu_id_purchase: int = None,
+    location_id: int = None,
+    description: str = None,
+) -> dict:
+    """
+    Create a new product in Grocy with a simple set of fields.
+
+    This is a convenience wrapper around POST /objects/products.
+
+    Args:
+        name: Product name.
+        qu_id_stock: Quantity unit ID used for stock (required by Grocy).
+        qu_id_purchase: Quantity unit ID used for purchasing (defaults to qu_id_stock).
+        location_id: Optional default location ID where the product is stored.
+        description: Optional description.
+    """
+    if qu_id_purchase is None:
+        qu_id_purchase = qu_id_stock
+    data = {
+        "name": name,
+        "qu_id_stock": qu_id_stock,
+        "qu_id_purchase": qu_id_purchase,
+    }
+    if location_id is not None:
+        data["location_id"] = location_id
+    if description:
+        data["description"] = description
+    return await make_request("POST", "objects/products", data=data)
+
+
+@mcp.tool()
+async def update_product(
+    product_id: int,
+    name: str = None,
+    description: str = None,
+    location_id: int = None,
+    qu_id_stock: int = None,
+    qu_id_purchase: int = None,
+    min_stock_amount: float = None,
+    product_group_id: int = None,
+) -> dict:
+    """
+    Update selected fields of an existing product.
+
+    Only fields provided (non-None) will be updated.
+
+    Args:
+        product_id: ID of the product to update.
+        name: New product name.
+        description: New description.
+        location_id: New default location ID.
+        qu_id_stock: New stock quantity unit ID.
+        qu_id_purchase: New purchase quantity unit ID.
+        min_stock_amount: New minimum stock amount.
+        product_group_id: New product group ID.
+    """
+    data: dict[str, Any] = {}
+    if name is not None:
+        data["name"] = name
+    if description is not None:
+        data["description"] = description
+    if location_id is not None:
+        data["location_id"] = location_id
+    if qu_id_stock is not None:
+        data["qu_id_stock"] = qu_id_stock
+    if qu_id_purchase is not None:
+        data["qu_id_purchase"] = qu_id_purchase
+    if min_stock_amount is not None:
+        data["min_stock_amount"] = min_stock_amount
+    if product_group_id is not None:
+        data["product_group_id"] = product_group_id
+    return await make_request("PUT", f"objects/products/{product_id}", data=data)
+
+
+@mcp.tool()
+async def delete_product(product_id: int) -> None:
+    """
+    Delete a product by id.
+
+    Args:
+        product_id: ID of the product to delete.
+    """
+    return await make_request("DELETE", f"objects/products/{product_id}")
+
+
+@mcp.tool()
+async def add_barcode_to_product(product_id: int, barcode: str, note: str = None) -> dict:
+    """
+    Add a barcode to an existing product.
+
+    This wraps POST /objects/product_barcodes.
+
+    Args:
+        product_id: Existing Grocy product ID.
+        barcode: Barcode string to associate with the product.
+        note: Optional note for this barcode entry.
+    """
+    data = {
+        "product_id": product_id,
+        "barcode": barcode,
+    }
+    if note:
+        data["note"] = note
+    return await make_request("POST", "objects/product_barcodes", data=data)
+
+
+@mcp.tool()
+async def delete_product_barcode(barcode_id: int) -> None:
+    """
+    Delete a product barcode by its object id.
+
+    Args:
+        barcode_id: ID of the product barcode row to delete.
+    """
+    return await make_request("DELETE", f"objects/product_barcodes/{barcode_id}")
+
+
+# Reference Data Tools
+
+@mcp.tool()
+async def get_quantity_units() -> List[dict]:
+    """
+    Get all quantity units.
+
+    Useful for choosing a valid qu_id_stock when creating a product.
+    """
+    return await make_request("GET", "objects/quantity_units")
+
+
+@mcp.tool()
+async def create_quantity_unit(name: str, name_plural: str = None, description: str = None) -> dict:
+    """
+    Create a new quantity unit.
+
+    Args:
+        name: Singular name of the unit (e.g., "Piece").
+        name_plural: Optional plural name (e.g., "Pieces").
+        description: Optional description of the unit.
+    """
+    data = {"name": name}
+    if name_plural:
+        data["name_plural"] = name_plural
+    if description:
+        data["description"] = description
+    return await make_request("POST", "objects/quantity_units", data=data)
+
+
+@mcp.tool()
+async def delete_quantity_unit(qu_id: int) -> None:
+    """
+    Delete a quantity unit by id.
+
+    Args:
+        qu_id: ID of the quantity unit to delete.
+    """
+    return await make_request("DELETE", f"objects/quantity_units/{qu_id}")
+
+
+@mcp.tool()
+async def get_locations() -> List[dict]:
+    """
+    Get all locations.
+
+    Useful for choosing a valid location_id when creating products or moving stock.
+    """
+    return await make_request("GET", "objects/locations")
+
+
+@mcp.tool()
+async def delete_location(location_id: int) -> None:
+    """
+    Delete a location by id.
+
+    Args:
+        location_id: ID of the location to delete.
+    """
+    return await make_request("DELETE", f"objects/locations/{location_id}")
+
+
+@mcp.tool()
+async def get_shopping_lists() -> List[dict]:
+    """
+    Get all shopping lists.
+
+    Useful for choosing a valid shopping_list_id.
+    """
+    return await make_request("GET", "objects/shopping_lists")
+
+
+@mcp.tool()
+async def delete_shopping_list(list_id: int) -> None:
+    """
+    Delete a shopping list definition by id (not just its items).
+
+    Args:
+        list_id: ID of the shopping list to delete.
+    """
+    return await make_request("DELETE", f"objects/shopping_lists/{list_id}")
+
+
+@mcp.tool()
+async def get_product_groups() -> List[dict]:
+    """
+    Get all product groups.
+
+    Helpful for categorizing products when managing stock.
+    """
+    return await make_request("GET", "objects/product_groups")
+
+
+@mcp.tool()
+async def delete_product_group(group_id: int) -> None:
+    """
+    Delete a product group by id.
+
+    Args:
+        group_id: ID of the product group to delete.
+    """
+    return await make_request("DELETE", f"objects/product_groups/{group_id}")
+
+
+@mcp.tool()
+async def get_batteries() -> List[dict]:
+    """
+    Get all batteries.
+    """
+    return await make_request("GET", "objects/batteries")
+
+
+@mcp.tool()
+async def get_battery(battery_id: int) -> dict:
+    """
+    Get details of a specific battery.
+
+    Args:
+        battery_id: The ID of the battery.
+    """
+    return await make_request("GET", f"objects/batteries/{battery_id}")
+
+
+@mcp.tool()
+async def delete_battery(battery_id: int) -> None:
+    """
+    Delete a battery by id.
+
+    Args:
+        battery_id: ID of the battery to delete.
+    """
+    return await make_request("DELETE", f"objects/batteries/{battery_id}")
+
+
+@mcp.tool()
+async def track_battery_charge(battery_id: int, tracked_time: str = None) -> dict:
+    """
+    Track a battery charge event.
+
+    Args:
+        battery_id: The ID of the battery.
+        tracked_time: Optional ISO timestamp when the battery was charged (defaults to now).
+    """
+    data = {}
+    if tracked_time:
+        data["tracked_time"] = tracked_time
+    return await make_request("POST", f"batteries/{battery_id}/charge", data=data)
+
+
+@mcp.tool()
+async def undo_battery_charge(charge_cycle_id: int) -> None:
+    """
+    Undo a battery charge cycle.
+
+    Args:
+        charge_cycle_id: The charge cycle ID to undo.
+    """
+    return await make_request("POST", f"batteries/charge-cycles/{charge_cycle_id}/undo")
+
+
+@mcp.tool()
+async def print_product_label(product_id: int) -> dict:
+    """
+    Print the Grocycode label of a product on the configured label printer.
+
+    Args:
+        product_id: The ID of the product.
+    """
+    return await make_request("GET", f"stock/products/{product_id}/printlabel")
+
+
+@mcp.tool()
+async def print_stock_entry_label(entry_id: int) -> dict:
+    """
+    Print the label for a specific stock entry on the configured label printer.
+
+    Args:
+        entry_id: The stock entry ID.
+    """
+    return await make_request("GET", f"stock/entry/{entry_id}/printlabel")
+
+
+@mcp.tool()
+async def undo_stock_booking(booking_id: int) -> None:
+    """
+    Undo a specific stock booking.
+
+    Args:
+        booking_id: The stock booking ID to undo.
+    """
+    return await make_request("POST", f"stock/bookings/{booking_id}/undo")
+
+
+@mcp.tool()
+async def undo_stock_transaction(transaction_id: str) -> None:
+    """
+    Undo a complete stock transaction (may contain multiple bookings).
+
+    Args:
+        transaction_id: The stock transaction ID to undo.
+    """
+    return await make_request("POST", f"stock/transactions/{transaction_id}/undo")
+
+
 # Chore Tools
 
 @mcp.tool()
@@ -421,6 +808,17 @@ async def get_chore(chore_id: int) -> dict:
     """
     return await make_request("GET", f"chores/{chore_id}")
 
+
+@mcp.tool()
+async def delete_chore(chore_id: int) -> None:
+    """
+    Delete a chore by id.
+
+    Args:
+        chore_id: ID of the chore to delete.
+    """
+    return await make_request("DELETE", f"objects/chores/{chore_id}")
+
 @mcp.tool()
 async def track_chore(chore_id: int, tracked_time: str = None, done_by: int = None) -> dict:
     """
@@ -438,6 +836,17 @@ async def track_chore(chore_id: int, tracked_time: str = None, done_by: int = No
         data["done_by"] = done_by
     
     return await make_request("POST", f"chores/{chore_id}/execute", data=data if data else None)
+
+
+@mcp.tool()
+async def undo_chore_execution(execution_id: int) -> None:
+    """
+    Undo a previously tracked chore execution.
+
+    Args:
+        execution_id: The chore execution ID to undo.
+    """
+    return await make_request("POST", f"chores/executions/{execution_id}/undo")
 
 # Task Tools
 
@@ -467,6 +876,29 @@ async def create_task(name: str, description: str = None, due_date: str = None) 
         data["due_date"] = due_date
     
     return await make_request("POST", "objects/tasks", data=data)
+
+
+@mcp.tool()
+async def update_task(task_id: int, name: str = None, description: str = None, due_date: str = None) -> None:
+    """
+    Update selected fields of an existing task.
+
+    Only fields provided (non-None) will be updated.
+
+    Args:
+        task_id: ID of the task to update.
+        name: New task name.
+        description: New task description.
+        due_date: New due date in YYYY-MM-DD format.
+    """
+    data: dict[str, Any] = {}
+    if name is not None:
+        data["name"] = name
+    if description is not None:
+        data["description"] = description
+    if due_date is not None:
+        data["due_date"] = due_date
+    return await make_request("PUT", f"objects/tasks/{task_id}", data=data)
 
 @mcp.tool()
 async def complete_task(task_id: int) -> dict:

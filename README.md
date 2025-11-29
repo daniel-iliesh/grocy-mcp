@@ -156,7 +156,79 @@ These are especially convenient for “purchasing by scanning” or quick consum
   Inventory a product by barcode (set absolute amount).  
   Grocy endpoint: `POST /stock/products/by-barcode/{barcode}/inventory`.
 
-### 3. Shopping List
+- **`external_barcode_lookup(barcode: str, add: bool = False)`**  
+  Use Grocy's external barcode lookup plugin to identify unknown barcodes. When `add=true` and supported, Grocy can auto-create the product.  
+  Grocy endpoint: `GET /stock/barcodes/external-lookup/{barcode}`.
+
+### 3. Product Creation & Barcodes
+
+- **`create_simple_product(name: str, qu_id_stock: int, qu_id_purchase: int | None = None, location_id: int | None = None, description: str | None = None)`**  
+  Create a new product with the most commonly used fields. If `qu_id_purchase` is omitted, it defaults to `qu_id_stock`.  
+  Grocy endpoint: `POST /objects/products`.
+
+- **`add_barcode_to_product(product_id: int, barcode: str, note: str | None = None)`**  
+  Attach a barcode to an existing product.  
+  Grocy endpoint: `POST /objects/product_barcodes`.
+
+- **`delete_product_barcode(barcode_id: int)`**  
+  Delete a product barcode row by id.  
+  Grocy endpoint: `DELETE /objects/product_barcodes/{id}`.
+
+- **`update_product(product_id: int, ...)`**  
+  Update selected fields of an existing product (name, description, location, units, min stock, product group).  
+  Grocy endpoint: `PUT /objects/products/{id}`.
+
+- **`delete_product(product_id: int)`**  
+  Delete a product by id. Use with care, as it removes the product definition.  
+  Grocy endpoint: `DELETE /objects/products/{id}`.
+
+- **`create_quantity_unit(name: str, name_plural: str | None = None, description: str | None = None)`**  
+  Create a new quantity unit (for example when you introduce a new kind of unit not yet in Grocy).  
+  Grocy endpoint: `POST /objects/quantity_units`.
+
+### 4. Reference Data (IDs the model usually needs)
+
+- **`get_quantity_units()`**  
+  List all quantity units. Use this to discover a valid `qu_id_stock` for `create_simple_product`.  
+  Grocy endpoint: `GET /objects/quantity_units`.
+
+- **`delete_quantity_unit(qu_id: int)`**  
+  Delete a quantity unit by id. Only do this when you're sure it's not used by existing products.  
+  Grocy endpoint: `DELETE /objects/quantity_units/{id}`.
+
+- **`get_locations()`**  
+  List all locations. Use this to discover valid `location_id` values for products and stock operations.  
+  Grocy endpoint: `GET /objects/locations`.
+
+- **`delete_location(location_id: int)`**  
+  Delete a location by id.  
+  Grocy endpoint: `DELETE /objects/locations/{id}`.
+
+- **`get_shopping_lists()`**  
+  List all shopping lists. Use this to pick the right `shopping_list_id`.  
+  Grocy endpoint: `GET /objects/shopping_lists`.
+
+- **`delete_shopping_list(list_id: int)`**  
+  Delete a shopping list definition (not just its items).  
+  Grocy endpoint: `DELETE /objects/shopping_lists/{id}`.
+
+- **`get_product_groups()`**  
+  List all product groups. Helpful for categorizing products when working directly with Grocy.  
+  Grocy endpoint: `GET /objects/product_groups`.
+
+- **`delete_product_group(group_id: int)`**  
+  Delete a product group by id.  
+  Grocy endpoint: `DELETE /objects/product_groups/{id}`.
+
+- **`undo_stock_booking(booking_id: int)`**  
+  Undo a single stock booking when something was logged incorrectly.  
+  Grocy endpoint: `POST /stock/bookings/{bookingId}/undo`.
+
+- **`undo_stock_transaction(transaction_id: str)`**  
+  Undo a whole stock transaction (multiple bookings) by transaction id.  
+  Grocy endpoint: `POST /stock/transactions/{transactionId}/undo`.
+
+### 5. Shopping List
 
 - **`get_shopping_list()`**  
   Get the current shopping list items.  
@@ -178,7 +250,7 @@ These are especially convenient for “purchasing by scanning” or quick consum
   Auto‑add all products below their minimum stock to the default shopping list.  
   Grocy endpoint: `POST /stock/shoppinglist/add-missing-products`.
 
-### 4. Recipes
+### 6. Recipes
 
 - **`get_recipes()`**  
   List all recipes.  
@@ -188,6 +260,10 @@ These are especially convenient for “purchasing by scanning” or quick consum
   Detailed recipe view including ingredients and instructions.  
   Grocy endpoint: `GET /objects/recipes/{recipeId}`.
 
+- **`delete_recipe(recipe_id: int)`**  
+  Delete a recipe by id.  
+  Grocy endpoint: `DELETE /objects/recipes/{id}`.
+
 - **`add_recipe_to_shopping_list(recipe_id: int)`**  
   Add missing ingredients for the given recipe to the shopping list.  
   Grocy endpoint: `POST /recipes/{recipeId}/add-not-fulfilled-products-to-shoppinglist`.
@@ -196,7 +272,15 @@ These are especially convenient for “purchasing by scanning” or quick consum
   Consume all required ingredients for a recipe from stock.  
   Grocy endpoint: `POST /recipes/{recipeId}/consume`.
 
-### 5. Chores
+- **`get_recipe_fulfillment(recipe_id: int)`**  
+  Get stock fulfillment info for a specific recipe (which ingredients are missing or partially available).  
+  Grocy endpoint: `GET /recipes/{recipeId}/fulfillment`.
+
+- **`get_all_recipes_fulfillment()`**  
+  Get fulfillment info for all recipes to answer questions like "What can I cook right now?".  
+  Grocy endpoint: `GET /recipes/fulfillment`.
+
+### 7. Chores
 
 - **`get_chores()`**  
   List all chores, including next estimated execution times.  
@@ -210,7 +294,15 @@ These are especially convenient for “purchasing by scanning” or quick consum
   Mark a chore as completed, optionally specifying who did it and at what time.  
   Grocy endpoint: `POST /chores/{choreId}/execute`.
 
-### 6. Tasks
+- **`undo_chore_execution(execution_id: int)`**  
+  Undo a previously tracked chore execution when it was logged by mistake.  
+  Grocy endpoint: `POST /chores/executions/{executionId}/undo`.
+
+- **`delete_chore(chore_id: int)`**  
+  Delete a chore definition by id.  
+  Grocy endpoint: `DELETE /objects/chores/{id}`.
+
+### 8. Tasks
 
 - **`get_tasks()`**  
   List all tasks.  
@@ -219,6 +311,10 @@ These are especially convenient for “purchasing by scanning” or quick consum
 - **`create_task(name: str, description: str | None = None, due_date: str | None = None)`**  
   Create a new task.  
   Grocy endpoint: `POST /objects/tasks`.
+
+- **`update_task(task_id: int, ...)`**  
+  Update selected fields of an existing task (name, description, due date).  
+  Grocy endpoint: `PUT /objects/tasks/{id}`.
 
 - **`complete_task(task_id: int)`**  
   Mark a task as completed.  
